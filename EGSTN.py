@@ -86,24 +86,3 @@ class EGSTN(nn.Module):
         f = torch.sum(torch.stack(dot_products), dim=1)/self.l
         x = self.conv1(f)
         return x
-#
-# D_in_dim=4
-# seq_length=12
-# num_nodes=524
-# batch_size=4
-# in_dim=1
-# l=3
-# dropout=0.5
-# S_in_dim=3
-# nhid=32
-# device='cpu'
-#
-# x=torch.randn(batch_size,in_dim+D_in_dim,num_nodes,seq_length)
-# supports=torch.randn(num_nodes,num_nodes)
-# CS=torch.randn(num_nodes,3)
-# model=EGSTN(device, num_nodes,l, dropout, supports=supports, batch_size=batch_size,
-#                            in_dim=in_dim,  S_in_dim=S_in_dim, D_in_dim=D_in_dim, out_dim=seq_length,
-#                            residual_channels=nhid, dilation_channels=nhid,
-#                            skip_channels=nhid * 8, end_channels=nhid * 16)
-# out=model(x,CS)
-# print(out.shape)
