@@ -9,12 +9,28 @@
 
 ## 3. Requirements
 
+Python >= 3.8
+torch = 1.13.0
+numpy = 1.25.2
+
 ## 4. Train Commands
 
 ```
 python train.py --force True --city ShenZhen_City --model EGSTN
 ```
+## 5. File directory description
+eg:
 
+```
+filetree 
+├── /data/ 
+├── /garage/
+├── README.md
+├── EGSTN.py
+├── train.py
+├── utils.py
+├── util.py
+```
 
 
 
