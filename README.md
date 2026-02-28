@@ -5,7 +5,7 @@
 ### Traffic Prediction with Environmental Context-Guided Spatiotemporal Network
 
 ## 2. Framework
-![image](Framework.png)
+![image](Fig2(2).png)
 
 ## 3. Requirements
 
