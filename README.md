@@ -2,7 +2,7 @@
 
 ## 1. Title
 
-### Traffic Prediction with Environmental Context-Guided Spatiotemporal Network
+### A Mobile Traffic Prediction Method with Environmental Anomaly Awareness and Multi-Level Context Learning
 
 ## 2. Framework
 ![image](Fig2.png)
