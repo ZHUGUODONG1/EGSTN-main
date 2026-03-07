@@ -4,10 +4,6 @@ import torch.nn.functional as F
 from torch.nn import Conv2d, Parameter
 
 
-# ==========================================
-# 1. Component Classes
-# ==========================================
-
 class cheby_conv(nn.Module):
     def __init__(self, c_in, c_out, K, dilation):
         super(cheby_conv, self).__init__()
@@ -130,10 +126,6 @@ class VAEM(nn.Module):
         return D.permute(0, 3, 1, 2), mu, log_var,loss1
 
 
-# ==========================================
-# 2. Main Architecture
-# ==========================================
-
 class ST_BLOCK_7(nn.Module):
     """Spatio-Temporal Block integrating TSFN, SSFN, and DGCN"""
 
@@ -199,4 +191,5 @@ class EGSTN(nn.Module):
             Z.append(v)
         out=self.conv1(torch.cat(Z, dim=1))
         return out, loss1
+
 
