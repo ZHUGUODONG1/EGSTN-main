@@ -97,6 +97,8 @@ class VAEM(nn.Module):
     def __init__(self, M, d, dg):
         super(VAEM, self).__init__()
         self.dg = dg
+        self.M = M  # Dimension of time-sensitive factors
+        self.d = d  # Dimension of traffic data
         self.encoder_conv = nn.Linear(M + d, dg)
         self.fc_mu = nn.Linear(dg, dg)
         self.fc_log_var = nn.Linear(dg, dg)
@@ -118,8 +120,13 @@ class VAEM(nn.Module):
         U_tilde = self.decoder(z)
 
         # Reconstruction error used for Collaborative Anomaly Score D
-        r = torch.norm(U - U_tilde, dim=-1, keepdim=True)
-        D = F.softmax(r, dim=1).repeat(1, 1, 1, CD.shape[1])
+        r = torch.abs(U - U_tilde)
+        # 3. Collaborative Enhancer Logic
+        r_alpha, r_beta = torch.split(r, [self.M, self.d], dim=-1)
+
+        r_gate = r_alpha * torch.sigmoid(torch.mean(r_beta, dim=-1, keepdim=True))
+        D = F.softmax(r_gate, dim=1)
+
         l_recon = F.l1_loss(U, U_tilde)
         l_distri = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
         loss1=l_distri+l_recon
@@ -191,5 +198,6 @@ class EGSTN(nn.Module):
             Z.append(v)
         out=self.conv1(torch.cat(Z, dim=1))
         return out, loss1
+
 
 
