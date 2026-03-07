@@ -71,14 +71,14 @@ class trainer():
         self.model.train()
         self.optimizer.zero_grad()
         # input = nn.functional.pad(input,(1,0,0,0))
-        output = self.model(input)
+        output,loss1 = self.model(input)
         output = output.transpose(1, 3)
         # output = [batch_size,12,num_nodes,1]
         real = torch.unsqueeze(real_val, dim=1)
 
         predict = output
 
-        loss = self.loss(predict, real, 0.0)
+        loss = self.loss(predict, real, 0.0)+loss1
 
         (loss).backward()
 
@@ -93,13 +93,13 @@ class trainer():
     def eval(self, input, real_val):
         self.model.eval()
         # input = nn.functional.pad(input,(1,0,0,0))
-        output = self.model(input)
+        output,loss1 = self.model(input)
         output = output.transpose(1, 3)
         # output = [batch_size,12,num_nodes,1]
         real = torch.unsqueeze(real_val, dim=1)
 
         predict = output
-        loss = self.loss(predict, real, 0.0)
+        loss = self.loss(predict, real, 0.0)+loss1
         mae = util.masked_mae(predict, real, 0.0).item()
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
@@ -235,7 +235,7 @@ def main():
         testx = torch.Tensor(x).to(device)
         testx = testx.transpose(1, 3)
         with torch.no_grad():
-            preds = engine.model(testx)
+            preds,loss1 = engine.model(testx)
             preds = preds.transpose(1, 3)
         outputs.append(preds.squeeze())
 
