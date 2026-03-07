@@ -91,6 +91,10 @@ class MultiScaleGCN(nn.Module):
         return S.permute(0, 3, 2, 1)  # Return as [B, C, N, T]
 
 
+import torch
+import torch.nn.functional as F
+
+
 class VAEM(nn.Module):
     """Variational Anomaly-Enhanced Module for collaborative anomaly detection"""
 
@@ -120,7 +124,10 @@ class VAEM(nn.Module):
         # Reconstruction error used for Collaborative Anomaly Score D
         r = torch.norm(U - U_tilde, dim=-1, keepdim=True)
         D = F.softmax(r, dim=1).repeat(1, 1, 1, CD.shape[1])
-        return D.permute(0, 3, 1, 2), mu, log_var
+        l_recon = F.l1_loss(U, U_tilde)
+        l_distri = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
+        loss1=l_distri+l_recon
+        return D.permute(0, 3, 1, 2), mu, log_var,loss1
 
 
 # ==========================================
@@ -172,7 +179,8 @@ class EGSTN(nn.Module):
     def forward(self, input):
         x = input[:, :1, :, :]
         CD = input[:, 1:, :, :]
-        D, mu, log_var = self.vaem(x, CD)
+
+        D, mu, log_var ,loss1 = self.vaem(x, CD)
 
         # Multi-level Interaction Feature S
         CS_fused = torch.einsum('bnt,nk->bntk', x.squeeze(1), self.CS)
@@ -189,5 +197,6 @@ class EGSTN(nn.Module):
         for block in self.blocks:
             v = block(v, A, S, D)
             Z.append(v)
+        out=self.conv1(torch.cat(Z, dim=1))
+        return out, loss1
 
-        return self.conv1(torch.cat(Z, dim=1)), mu, log_var
