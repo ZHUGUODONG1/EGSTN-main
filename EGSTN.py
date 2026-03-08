@@ -40,9 +40,9 @@ class TimeSensitiveFusion(nn.Module):
     def __init__(self, M, d, dg):
         super(TimeSensitiveFusion, self).__init__()
         self.M = M
-        self.W_Q = nn.Linear(d, dg)  # Projection for traffic data X [cite: 420]
+        self.W_Q = nn.Linear(d, dg)  # Projection for traffic data X 
         self.W_K = nn.ModuleList(
-            [nn.Linear(1, dg) for _ in range(M)])  # Projection for environmental factors [cite: 420]
+            [nn.Linear(1, dg) for _ in range(M)])  # Projection for environmental factors
         self.W_V = nn.Linear(d, dg)
 
     def forward(self, X, CT, D):
@@ -56,13 +56,13 @@ class TimeSensitiveFusion(nn.Module):
         V = self.W_V(X_trans)
 
         H_total = 0
-        # Equation (30): Calculate attention for each factor j [cite: 418]
+        # Equation (30): Calculate attention for each factor j 
         for j in range(self.M):
             K_j = self.W_K[j](CT_trans[..., j:j + 1])
             # Attention-derived importance weights
             H_j_D = torch.sigmoid(Q * K_j)
 
-            # Equation (31): Multiply with collaborative anomaly score D^j [cite: 416, 418]
+            # Equation (31): Multiply with collaborative anomaly score D^j 
             H_total += H_j_D * D_trans[..., j:j + 1] * V
 
         return H_total.permute(0, 3, 1, 2)  # [B, dg, N, T]
@@ -165,24 +165,24 @@ class ST_BLOCK_7(nn.Module):
 
     def __init__(self, c_in, c_out, in_dim, S_in_dim, D_in_dim, num_nodes, tem_size, K, Kt):
         super(ST_BLOCK_7, self).__init__()
-        self.TSFN = TimeSensitiveFusion(M=D_in_dim, d=c_in, dg=c_out)  # [cite: 414, 418]
-        self.conv1 = Conv2d(c_out, c_out, kernel_size=(1, Kt), padding=(0, Kt // 2))  # Gated TCN [cite: 423]
-        self.gcn = cheby_conv(c_out, 2 * c_out, K, 1)  # DGCN [cite: 440, 444]
-        # Spatial-Specific Fusion Network (Equation 35) [cite: 436, 437]
+        self.TSFN = TimeSensitiveFusion(M=D_in_dim, d=c_in, dg=c_out) 
+        self.conv1 = Conv2d(c_out, c_out, kernel_size=(1, Kt), padding=(0, Kt // 2))  # Gated TCN
+        self.gcn = cheby_conv(c_out, 2 * c_out, K, 1)  # DGCN
+        # Spatial-Specific Fusion Network (Equation 35) 
         self.SSFN = SpatialSpecificFusion(c_out, c_out, c_out)
         self.c_out = c_out
         self.conv_resid = Conv2d(c_in, c_out, kernel_size=(1, 1))
 
     def forward(self, x, supports, CD, S, D):
-        # 1. Time-Sensitive Fusion [cite: 415, 417]
+        # 1. Time-Sensitive Fusion
         HD = self.TSFN(x, CD, D)
-        # 2. Gated Temporal Convolution [cite: 430, 431]
+        # 2. Gated Temporal Convolution 
         x_temp = self.conv1(HD)
-        # 3. Spatial-Specific Fusion integrating multi-level S [cite: 436]
+        # 3. Spatial-Specific Fusion integrating multi-level S
         XS = self.SSFN(S, x_temp)
-        # 4. Dynamic Graph Convolution [cite: 440, 445]
+        # 4. Dynamic Graph Convolution 
         x_spat = self.gcn(XS, supports)
-        filter, gate = torch.split(x_spat, [self.c_out, self.c_out], 1)  # [cite: 431, 433]
+        filter, gate = torch.split(x_spat, [self.c_out, self.c_out], 1) 
         return (filter + self.conv_resid(x)) * torch.sigmoid(gate)
 
 
@@ -192,27 +192,27 @@ class EGSTN(nn.Module):
                  in_dim=1, S_in_dim=3, D_in_dim=4, out_dim=12, dilation_channels=32, K=3, Kt=3):
         super(EGSTN, self).__init__()
         self.l, self.dropout, self.CS, self.supports = l, dropout, CS, supports
-        self.vaem = VAEM(M=D_in_dim, d=in_dim, dg=dilation_channels)  # [cite: 233, 234]
-        self.MII = MultiScaleGCN(S_in_dim, dilation_channels, length, num_nodes)  # [cite: 91, 362]
+        self.vaem = VAEM(M=D_in_dim, d=in_dim, dg=dilation_channels)  
+        self.MII = MultiScaleGCN(S_in_dim, dilation_channels, length, num_nodes)  
 
         self.blocks = nn.ModuleList([
             ST_BLOCK_7(in_dim if i == 0 else dilation_channels, dilation_channels, in_dim,
                        S_in_dim, D_in_dim, num_nodes, length, K, Kt)
             for i in range(l)
         ])
-        # Output layer for final traffic flow prediction [cite: 450, 452]
+        # Output layer for final traffic flow prediction
         self.output_layer = Conv2d(l * dilation_channels, out_dim, kernel_size=(1, length))
-        self.h = Parameter(torch.zeros(num_nodes, num_nodes))  # Learnable adjacency matrix [cite: 441, 442]
+        self.h = Parameter(torch.zeros(num_nodes, num_nodes))  # Learnable adjacency matrix
         nn.init.uniform_(self.h, a=0, b=0.0001)
 
     def forward(self, input):
-        x, CD = input[:, :1, :, :], input[:, 1:, :, :]  # [cite: 143, 153]
+        x, CD = input[:, :1, :, :], input[:, 1:, :, :]
         # Step 1: Anomaly perception [cite: 230, 239]
         D, mu, log_var, loss_vae = self.vaem(x, CD)
-        # Step 2: Multi-level spatial context S [cite: 92, 363, 409]
+        # Step 2: Multi-level spatial context S
         CS_fused = torch.einsum('bnt,nk->bntk', x.squeeze(1), self.CS)
         S = self.MII(CS_fused.permute(0, 2, 1, 3), self.supports)
-        # Step 3: Dynamic graph learning [cite: 440, 442]
+        # Step 3: Dynamic graph learning
         A = F.softmax(F.relu(self.h), dim=-1)
         A = F.dropout(A, self.dropout, self.training)
 
@@ -222,5 +222,6 @@ class EGSTN(nn.Module):
             v = block(v, A, CD, S, D)
             Z.append(v)
         out=self.output_layer(torch.cat(Z, dim=1))
-        # Step 4: Final prediction [cite: 451, 454]
+        # Step 4: Final prediction
         return out, loss_vae
+
