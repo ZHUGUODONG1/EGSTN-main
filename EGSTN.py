@@ -16,11 +16,10 @@ class cheby_conv(nn.Module):
         return torch.cat([out, out], dim=1)  # Simulated output for gated split
 
 
-class Cross_Attention(nn.Module):
-    """Integrated Fusion Network (TSFN/SSFN)"""
+class SpatialSpecificFusion(nn.Module):
 
     def __init__(self, c_in_env, c_in_traffic, c_out):
-        super(Cross_Attention, self).__init__()
+        super(SpatialSpecificFusion, self).__init__()
         self.query = nn.Conv2d(c_in_env, c_out, 1)
         self.key = nn.Conv2d(c_in_traffic, c_out, 1)
         self.value = nn.Conv2d(c_in_traffic, c_out, 1)
@@ -33,6 +32,40 @@ class Cross_Attention(nn.Module):
         attn = torch.sigmoid(q * k)
         return attn * v
 
+
+class TimeSensitiveFusion(nn.Module):
+    """
+    Time-Sensitive Fusion Network
+    """
+    def __init__(self, M, d, dg):
+        super(TimeSensitiveFusion, self).__init__()
+        self.M = M
+        self.W_Q = nn.Linear(d, dg)  # Projection for traffic data X [cite: 420]
+        self.W_K = nn.ModuleList(
+            [nn.Linear(1, dg) for _ in range(M)])  # Projection for environmental factors [cite: 420]
+        self.W_V = nn.Linear(d, dg)
+
+    def forward(self, X, CT, D):
+        # X: [B, d, N, T], CT: [B, M, N, T], D: [B, M, N, T]
+        B, _, N, T = X.shape
+        X_trans = X.permute(0, 2, 3, 1)  # [B, N, T, d]
+        CT_trans = CT.permute(0, 2, 3, 1)  # [B, N, T, M]
+        D_trans = D.permute(0, 2, 3, 1)  # [B, N, T, M]
+
+        Q = self.W_Q(X_trans)
+        V = self.W_V(X_trans)
+
+        H_total = 0
+        # Equation (30): Calculate attention for each factor j [cite: 418]
+        for j in range(self.M):
+            K_j = self.W_K[j](CT_trans[..., j:j + 1])
+            # Attention-derived importance weights
+            H_j_D = torch.sigmoid(Q * K_j)
+
+            # Equation (31): Multiply with collaborative anomaly score D^j [cite: 416, 418]
+            H_total += H_j_D * D_trans[..., j:j + 1] * V
+
+        return H_total.permute(0, 3, 1, 2)  # [B, dg, N, T]
 
 class MultiScaleGCN(nn.Module):
     """
@@ -70,7 +103,6 @@ class MultiScaleGCN(nn.Module):
         adj: [N, N] - Adjacency matrix
         """
         multi_scale_features = []
-
         # 1. Original Scale (Small Scale)
         feat_small = torch.relu(self.gcn_layers[0](x))
         multi_scale_features.append(feat_small)
@@ -80,15 +112,10 @@ class MultiScaleGCN(nn.Module):
             pooled_x, _ = self.sag_pool(x, adj, ratio)
             feat_pooled = torch.relu(self.gcn_layers[i + 1](pooled_x))
             multi_scale_features.append(feat_pooled)
-
         # 3. Concatenation and Fusion
         f_prime = torch.cat(multi_scale_features, dim=-1)  # [B, T, N, (1+L)*c_out]
         S = self.fusion_fc(f_prime)
         return S.permute(0, 3, 2, 1)  # Return as [B, C, N, T]
-
-
-import torch
-import torch.nn.functional as F
 
 
 class VAEM(nn.Module):
@@ -134,70 +161,66 @@ class VAEM(nn.Module):
 
 
 class ST_BLOCK_7(nn.Module):
-    """Spatio-Temporal Block integrating TSFN, SSFN, and DGCN"""
+    """Spatio-Temporal Block capturing environment-driven dependencies"""
 
     def __init__(self, c_in, c_out, in_dim, S_in_dim, D_in_dim, num_nodes, tem_size, K, Kt):
         super(ST_BLOCK_7, self).__init__()
-        self.TSFN = Cross_Attention(D_in_dim, c_in, c_out)
-        self.conv1 = Conv2d(c_out, c_out, kernel_size=(1, Kt), padding=(0, Kt // 2))
-        self.gcn = cheby_conv(c_out, 2 * c_out, K, 1)
-        self.SSFN = Cross_Attention(D_in_dim, c_out, c_out)
+        self.TSFN = TimeSensitiveFusion(M=D_in_dim, d=c_in, dg=c_out)  # [cite: 414, 418]
+        self.conv1 = Conv2d(c_out, c_out, kernel_size=(1, Kt), padding=(0, Kt // 2))  # Gated TCN [cite: 423]
+        self.gcn = cheby_conv(c_out, 2 * c_out, K, 1)  # DGCN [cite: 440, 444]
+        # Spatial-Specific Fusion Network (Equation 35) [cite: 436, 437]
+        self.SSFN = SpatialSpecificFusion(c_out, c_out, c_out)
         self.c_out = c_out
-        self.conv_1 = Conv2d(c_in, c_out, kernel_size=(1, 1))
+        self.conv_resid = Conv2d(c_in, c_out, kernel_size=(1, 1))
 
-    def forward(self, x, supports, S, D):
-        x_input1 = self.conv_1(x)
-        XD = self.TSFN(D, x) + x_input1  # Time-Sensitive Fusion
-        x1 = self.conv1(XD)
-        XS = self.SSFN(S, x1)  # Spatial-Specific Fusion
-        x2 = self.gcn(XS, supports)  # Dynamic Graph Convolution
-        filter, gate = torch.split(x2, [self.c_out, self.c_out], 1)
-        return (filter + x_input1) * torch.sigmoid(gate)
+    def forward(self, x, supports, CD, S, D):
+        # 1. Time-Sensitive Fusion [cite: 415, 417]
+        HD = self.TSFN(x, CD, D)
+        # 2. Gated Temporal Convolution [cite: 430, 431]
+        x_temp = self.conv1(HD)
+        # 3. Spatial-Specific Fusion integrating multi-level S [cite: 436]
+        XS = self.SSFN(S, x_temp)
+        # 4. Dynamic Graph Convolution [cite: 440, 445]
+        x_spat = self.gcn(XS, supports)
+        filter, gate = torch.split(x_spat, [self.c_out, self.c_out], 1)  # [cite: 431, 433]
+        return (filter + self.conv_resid(x)) * torch.sigmoid(gate)
 
 
 class EGSTN(nn.Module):
-    """Environment-guided Spatio-Temporal Network"""
-
+    
     def __init__(self, device, num_nodes, l, dropout=0.3, supports=None, CS=None, length=12,
                  in_dim=1, S_in_dim=3, D_in_dim=4, out_dim=12, dilation_channels=32, K=3, Kt=3):
         super(EGSTN, self).__init__()
         self.l, self.dropout, self.CS, self.supports = l, dropout, CS, supports
-        self.vaem = VAEM(M=D_in_dim, d=in_dim, dg=dilation_channels)
-        self.MII = MultiScaleGCN(S_in_dim, D_in_dim, length, num_nodes)
+        self.vaem = VAEM(M=D_in_dim, d=in_dim, dg=dilation_channels)  # [cite: 233, 234]
+        self.MII = MultiScaleGCN(S_in_dim, dilation_channels, length, num_nodes)  # [cite: 91, 362]
 
         self.blocks = nn.ModuleList([
             ST_BLOCK_7(in_dim if i == 0 else dilation_channels, dilation_channels, in_dim,
                        S_in_dim, D_in_dim, num_nodes, length, K, Kt)
             for i in range(l)
         ])
-
-        self.conv1 = Conv2d(l * dilation_channels, out_dim, kernel_size=(1, length))
-        self.h = Parameter(torch.zeros(num_nodes, num_nodes))
+        # Output layer for final traffic flow prediction [cite: 450, 452]
+        self.output_layer = Conv2d(l * dilation_channels, out_dim, kernel_size=(1, length))
+        self.h = Parameter(torch.zeros(num_nodes, num_nodes))  # Learnable adjacency matrix [cite: 441, 442]
         nn.init.uniform_(self.h, a=0, b=0.0001)
 
     def forward(self, input):
-        x = input[:, :1, :, :]
-        CD = input[:, 1:, :, :]
-
-        D, mu, log_var ,loss1 = self.vaem(x, CD)
-
-        # Multi-level Interaction Feature S
+        x, CD = input[:, :1, :, :], input[:, 1:, :, :]  # [cite: 143, 153]
+        # Step 1: Anomaly perception [cite: 230, 239]
+        D, mu, log_var, loss_vae = self.vaem(x, CD)
+        # Step 2: Multi-level spatial context S [cite: 92, 363, 409]
         CS_fused = torch.einsum('bnt,nk->bntk', x.squeeze(1), self.CS)
         S = self.MII(CS_fused.permute(0, 2, 1, 3), self.supports)
-
-        # Learned Adjacency Matrix
-        A = self.h
-        d = 1 / (torch.sum(A, -1) + 0.0001)
-        A = torch.matmul(torch.diag_embed(d), A)
+        # Step 3: Dynamic graph learning [cite: 440, 442]
+        A = F.softmax(F.relu(self.h), dim=-1)
         A = F.dropout(A, self.dropout, self.training)
 
         Z = []
         v = x
         for block in self.blocks:
-            v = block(v, A, S, D)
+            v = block(v, A, CD, S, D)
             Z.append(v)
-        out=self.conv1(torch.cat(Z, dim=1))
-        return out, loss1
-
-
-
+        out=self.output_layer(torch.cat(Z, dim=1))
+        # Step 4: Final prediction [cite: 451, 454]
+        return out, loss_vae
