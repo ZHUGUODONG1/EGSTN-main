@@ -56,7 +56,7 @@ class TimeSensitiveFusion(nn.Module):
         V = self.W_V(X_trans)
 
         H_total = 0
-        # Equation (30): Calculate attention for each factor j 
+        # Calculate attention for each factor j 
         for j in range(self.M):
             K_j = self.W_K[j](CT_trans[..., j:j + 1])
             # Attention-derived importance weights
@@ -224,4 +224,5 @@ class EGSTN(nn.Module):
         out=self.output_layer(torch.cat(Z, dim=1))
         # Step 4: Final prediction
         return out, loss_vae
+
 
