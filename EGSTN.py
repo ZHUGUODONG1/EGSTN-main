@@ -93,7 +93,6 @@ class MultiScaleGCN(nn.Module):
         score = torch.mean(x, dim=(1, 3))  # [B, N]
         k = max(1, int(ratio * N))
         _, top_indices = torch.topk(score, k, dim=1)
-
         # Placeholder for pooled structure logic
         return x, adj
 
@@ -224,5 +223,6 @@ class EGSTN(nn.Module):
         out=self.output_layer(torch.cat(Z, dim=1))
         # Step 4: Final prediction
         return out, loss_vae
+
 
 
